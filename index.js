@@ -779,17 +779,7 @@ console.log(
 console.log('🔄 Discordへログインを開始します...');
 
 client.on('debug', msg => {
-  if (
-    msg.includes('Token') ||
-    msg.includes('Connecting') ||
-    msg.includes('Identifying') ||
-    msg.includes('Ready') ||
-    msg.includes('Heartbeat') ||
-    msg.includes('Error') ||
-    msg.includes('WS')
-  ) {
-    console.log('🪲 [discord.js debug]:', msg);
-  }
+  console.log('🪲 [debug]:', msg);
 });
 
 client.once('clientReady', async () => {

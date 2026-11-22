@@ -761,9 +761,17 @@ server.listen(PORT, () => {
   console.log(`🌐 HTTPヘルスチェックサーバーがポート ${PORT} で待機中です。`);
 });
 
-client.once('ready', async () => {
+console.log('🔄 Discordへログインを開始します...');
+
+client.once('clientReady', async () => {
   console.log(`🤖 ログイン完了: ${client.user.tag}`);
   await registerCommands();
 });
 
-client.login(TOKEN);
+client.on('error', err => {
+  console.error('❌ Discordクライアントエラー:', err);
+});
+
+client.login(TOKEN).catch(err => {
+  console.error('❌ Discordログイン失敗:', err);
+});

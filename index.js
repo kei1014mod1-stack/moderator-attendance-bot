@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import dns from 'node:dns';
+import { createRequire } from 'node:module';
 import {
   Client,
   GatewayIntentBits,
@@ -16,7 +17,13 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
 } from 'discord.js';
-import { callGasApi } from './gasClient.js';
+
+const require = createRequire(import.meta.url);
+const gasClientModule = require('./gasClient.js');
+const callGasApi =
+  typeof gasClientModule === 'function'
+    ? gasClientModule
+    : gasClientModule.callGasApi || gasClientModule.default;
 
 if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
@@ -31,7 +38,7 @@ const cleanToken = String(TOKEN || '').trim();
 
 console.log('🚀 index.js 起動シーケンスを開始します...');
 console.log(
-  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}`
+  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}, HAS_GAS_FN=${typeof callGasApi === 'function'}`
 );
 
 // Render Web Service 用のヘルスチェックサーバー
@@ -110,6 +117,10 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ embeds: [embed], components: [row] });
       } else if (interaction.commandName === 'status') {
         await interaction.deferReply({ ephemeral: true });
+        if (typeof callGasApi !== 'function') {
+          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
+          return;
+        }
         const result = await callGasApi({
           action: 'status',
           discordId: interaction.user.id,
@@ -122,6 +133,10 @@ client.on('interactionCreate', async (interaction) => {
     } else if (interaction.isButton()) {
       if (interaction.customId === 'shift_start') {
         await interaction.deferReply({ ephemeral: true });
+        if (typeof callGasApi !== 'function') {
+          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
+          return;
+        }
         const result = await callGasApi({
           action: 'start',
           discordId: interaction.user.id,
@@ -149,6 +164,10 @@ client.on('interactionCreate', async (interaction) => {
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'shift_end_modal') {
         await interaction.deferReply({ ephemeral: true });
+        if (typeof callGasApi !== 'function') {
+          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
+          return;
+        }
         const note = interaction.fields.getTextInputValue('shift_note') || '';
         const result = await callGasApi({
           action: 'end',

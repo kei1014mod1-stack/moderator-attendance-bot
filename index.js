@@ -53,14 +53,17 @@ if (typeof GasClientClass === 'function') {
 
 async function callGasApi(payload) {
   if (typeof gasClientModule?.callGasApi === 'function') {
-    return await gasClientModule.callGasApi(payload);
+    return await gasClientModule.callGasApi(payload.action, payload);
   }
   if (!gasClientInstance) {
     throw new Error('GasClient インスタンスが初期化されていません。');
   }
-  for (const methodName of ['post', 'request', 'call', 'send', 'execute']) {
+  if (typeof gasClientInstance.call === 'function') {
+    return await gasClientInstance.call(payload.action, payload);
+  }
+  for (const methodName of ['post', 'request', 'send', 'execute']) {
     if (typeof gasClientInstance[methodName] === 'function') {
-      return await gasClientInstance[methodName](payload);
+      return await gasClientInstance[methodName](payload.action, payload);
     }
   }
   throw new Error(

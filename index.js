@@ -16,14 +16,11 @@ import {
   TextInputStyle,
   EmbedBuilder,
   PermissionFlagsBits,
+  MessageFlags,
 } from 'discord.js';
 
 const require = createRequire(import.meta.url);
 const gasClientModule = require('./gasClient.js');
-const callGasApi =
-  typeof gasClientModule === 'function'
-    ? gasClientModule
-    : gasClientModule.callGasApi || gasClientModule.default;
 
 if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
@@ -36,9 +33,44 @@ const PORT = Number(process.env.PORT || 10000);
 
 const cleanToken = String(TOKEN || '').trim();
 
+const GasClientClass =
+  typeof gasClientModule === 'function'
+    ? gasClientModule
+    : gasClientModule.GasClient || gasClientModule.default;
+
+let gasClientInstance = null;
+if (typeof GasClientClass === 'function') {
+  try {
+    gasClientInstance = new GasClientClass(GAS_WEB_APP_URL);
+  } catch {
+    try {
+      gasClientInstance = new GasClientClass();
+    } catch (err) {
+      console.error('❌ GasClient 初期化エラー:', err);
+    }
+  }
+}
+
+async function callGasApi(payload) {
+  if (typeof gasClientModule?.callGasApi === 'function') {
+    return await gasClientModule.callGasApi(payload);
+  }
+  if (!gasClientInstance) {
+    throw new Error('GasClient インスタンスが初期化されていません。');
+  }
+  for (const methodName of ['post', 'request', 'call', 'send', 'execute']) {
+    if (typeof gasClientInstance[methodName] === 'function') {
+      return await gasClientInstance[methodName](payload);
+    }
+  }
+  throw new Error(
+    `GasClient に呼び出し可能メソッドが見つかりません: ${Object.getOwnPropertyNames(Object.getPrototypeOf(gasClientInstance))}`
+  );
+}
+
 console.log('🚀 index.js 起動シーケンスを開始します...');
 console.log(
-  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}, HAS_GAS_FN=${typeof callGasApi === 'function'}`
+  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}, HAS_GAS_CLIENT=${Boolean(gasClientInstance)}`
 );
 
 // Render Web Service 用のヘルスチェックサーバー
@@ -82,7 +114,9 @@ async function registerCommands() {
 }
 
 client.on('debug', (msg) => {
-  console.log('🪲 [debug]:', msg);
+  if (!msg.includes('Heartbeat')) {
+    console.log('🪲 [debug]:', msg);
+  }
 });
 
 client.once('clientReady', async () => {
@@ -116,11 +150,7 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({ embeds: [embed], components: [row] });
       } else if (interaction.commandName === 'status') {
-        await interaction.deferReply({ ephemeral: true });
-        if (typeof callGasApi !== 'function') {
-          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
-          return;
-        }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const result = await callGasApi({
           action: 'status',
           discordId: interaction.user.id,
@@ -132,11 +162,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     } else if (interaction.isButton()) {
       if (interaction.customId === 'shift_start') {
-        await interaction.deferReply({ ephemeral: true });
-        if (typeof callGasApi !== 'function') {
-          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
-          return;
-        }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const result = await callGasApi({
           action: 'start',
           discordId: interaction.user.id,
@@ -163,11 +189,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'shift_end_modal') {
-        await interaction.deferReply({ ephemeral: true });
-        if (typeof callGasApi !== 'function') {
-          await interaction.editReply({ content: '⚠️ gasClient.js の関数が見つかりません。' });
-          return;
-        }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const note = interaction.fields.getTextInputValue('shift_note') || '';
         const result = await callGasApi({
           action: 'end',
@@ -184,26 +206,18 @@ client.on('interactionCreate', async (interaction) => {
   } catch (err) {
     console.error('❌ インタラクション処理エラー:', err);
     if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({ content: '⚠️ 処理中にエラーが発生しました。', ephemeral: true }).catch(() => {});
+      await interaction
+        .followUp({ content: '⚠️ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral })
+        .catch(() => {});
     } else {
-      await interaction.reply({ content: '⚠️ 処理中にエラーが発生しました。', ephemeral: true }).catch(() => {});
+      await interaction
+        .reply({ content: '⚠️ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral })
+        .catch(() => {});
     }
   }
 });
 
 (async () => {
-  try {
-    console.log('🌐 /api/v10/gateway へ疎通確認中...');
-    const res = await fetch('https://discord.com/api/v10/gateway', {
-      headers: { Authorization: `Bot ${cleanToken}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    const text = await res.text();
-    console.log(`📡 Gateway API レスポンス: status=${res.status}, body=${text}`);
-  } catch (err) {
-    console.error('❌ Gateway API 疎通エラー:', err);
-  }
-
   console.log('🔄 Discordへログインを開始します...');
   const loginTimer = setTimeout(() => {
     console.warn('⚠️ ログイン開始から10秒経過しましたが完了していません。');

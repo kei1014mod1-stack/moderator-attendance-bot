@@ -20,7 +20,7 @@ import {
 } from 'discord.js';
 
 const require = createRequire(import.meta.url);
-const gasClientModule = require('./gasClient.js');
+const GasClientClass = require('./gasClient.js');
 
 if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
@@ -32,48 +32,11 @@ const GAS_WEB_APP_URL = process.env.GAS_WEB_APP_URL;
 const PORT = Number(process.env.PORT || 10000);
 
 const cleanToken = String(TOKEN || '').trim();
-
-const GasClientClass =
-  typeof gasClientModule === 'function'
-    ? gasClientModule
-    : gasClientModule.GasClient || gasClientModule.default;
-
-let gasClientInstance = null;
-if (typeof GasClientClass === 'function') {
-  try {
-    gasClientInstance = new GasClientClass(GAS_WEB_APP_URL);
-  } catch {
-    try {
-      gasClientInstance = new GasClientClass();
-    } catch (err) {
-      console.error('❌ GasClient 初期化エラー:', err);
-    }
-  }
-}
-
-async function callGasApi(payload) {
-  if (typeof gasClientModule?.callGasApi === 'function') {
-    return await gasClientModule.callGasApi(payload.action, payload);
-  }
-  if (!gasClientInstance) {
-    throw new Error('GasClient インスタンスが初期化されていません。');
-  }
-  if (typeof gasClientInstance.call === 'function') {
-    return await gasClientInstance.call(payload.action, payload);
-  }
-  for (const methodName of ['post', 'request', 'send', 'execute']) {
-    if (typeof gasClientInstance[methodName] === 'function') {
-      return await gasClientInstance[methodName](payload.action, payload);
-    }
-  }
-  throw new Error(
-    `GasClient に呼び出し可能メソッドが見つかりません: ${Object.getOwnPropertyNames(Object.getPrototypeOf(gasClientInstance))}`
-  );
-}
+const gasClient = new GasClientClass(GAS_WEB_APP_URL);
 
 console.log('🚀 index.js 起動シーケンスを開始します...');
 console.log(
-  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}, HAS_GAS_CLIENT=${Boolean(gasClientInstance)}`
+  `🔍 環境変数確認: TOKEN_LEN=${cleanToken.length}, HAS_WS=${/\s/.test(cleanToken)}, HAS_CLIENT_ID=${Boolean(CLIENT_ID)}, HAS_GAS_URL=${Boolean(GAS_WEB_APP_URL)}`
 );
 
 // Render Web Service 用のヘルスチェックサーバー
@@ -116,6 +79,13 @@ async function registerCommands() {
   }
 }
 
+function formatResultMessage(fallbackText, data) {
+  if (!data) return fallbackText;
+  if (typeof data === 'string') return data;
+  if (data.message) return data.message;
+  return `${fallbackText}\n\`\`\`json\n${JSON.stringify(data, null, 2).slice(0, 1500)}\n\`\`\``;
+}
+
 client.on('debug', (msg) => {
   if (!msg.includes('Heartbeat')) {
     console.log('🪲 [debug]:', msg);
@@ -133,6 +103,8 @@ client.on('error', (err) => {
 
 client.on('interactionCreate', async (interaction) => {
   try {
+    const displayName = interaction.member?.displayName || interaction.user.username;
+
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'panel') {
         const embed = new EmbedBuilder()
@@ -154,31 +126,29 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ embeds: [embed], components: [row] });
       } else if (interaction.commandName === 'status') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const result = await callGasApi({
-          action: 'status',
-          discordId: interaction.user.id,
-          username: interaction.user.username,
-        });
+        const data = await gasClient.getActive(interaction.user.id);
         await interaction.editReply({
-          content: result?.message || '現在の勤務状況を取得しました。',
+          content: formatResultMessage('📋 現在の勤務状況を取得しました。', data),
         });
       }
     } else if (interaction.isButton()) {
       if (interaction.customId === 'shift_start') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const result = await callGasApi({
-          action: 'start',
-          discordId: interaction.user.id,
-          username: interaction.user.username,
-          displayName: interaction.member?.displayName || interaction.user.username,
-        });
+        const data = await gasClient.clockIn(interaction.user.id, displayName);
         await interaction.editReply({
-          content: result?.message || '✅ 勤務開始を記録しました。',
+          content: formatResultMessage('✅ 勤務開始を記録しました。', data),
         });
       } else if (interaction.customId === 'shift_end') {
         const modal = new ModalBuilder()
           .setCustomId('shift_end_modal')
           .setTitle('勤務終了レポート');
+
+        const casesInput = new TextInputBuilder()
+          .setCustomId('cases_count')
+          .setLabel('対応件数（数字・未入力なら0）')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder('例：3');
 
         const noteInput = new TextInputBuilder()
           .setCustomId('shift_note')
@@ -187,22 +157,27 @@ client.on('interactionCreate', async (interaction) => {
           .setRequired(false)
           .setPlaceholder('例：サーバー巡回、迷惑行為対応など');
 
-        modal.addComponents(new ActionRowBuilder().addComponents(noteInput));
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(casesInput),
+          new ActionRowBuilder().addComponents(noteInput)
+        );
         await interaction.showModal(modal);
       }
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId === 'shift_end_modal') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const note = interaction.fields.getTextInputValue('shift_note') || '';
-        const result = await callGasApi({
-          action: 'end',
-          discordId: interaction.user.id,
-          username: interaction.user.username,
-          displayName: interaction.member?.displayName || interaction.user.username,
-          note,
-        });
+        const rawCases = interaction.fields.getTextInputValue('cases_count')?.trim();
+        const casesCount = rawCases && !Number.isNaN(Number(rawCases)) ? Number(rawCases) : 0;
+        const notes = interaction.fields.getTextInputValue('shift_note') || '';
+
+        const data = await gasClient.clockOut(
+          interaction.user.id,
+          displayName,
+          casesCount,
+          notes
+        );
         await interaction.editReply({
-          content: result?.message || '🛑 勤務終了を記録しました。',
+          content: formatResultMessage('🛑 勤務終了を記録しました。', data),
         });
       }
     }
@@ -210,11 +185,17 @@ client.on('interactionCreate', async (interaction) => {
     console.error('❌ インタラクション処理エラー:', err);
     if (interaction.deferred || interaction.replied) {
       await interaction
-        .followUp({ content: '⚠️ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral })
+        .followUp({
+          content: `⚠️ 処理中にエラーが発生しました: ${err?.message || err}`,
+          flags: MessageFlags.Ephemeral,
+        })
         .catch(() => {});
     } else {
       await interaction
-        .reply({ content: '⚠️ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral })
+        .reply({
+          content: `⚠️ 処理中にエラーが発生しました: ${err?.message || err}`,
+          flags: MessageFlags.Ephemeral,
+        })
         .catch(() => {});
     }
   }

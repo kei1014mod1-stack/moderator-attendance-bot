@@ -797,13 +797,48 @@ const loginTimer = setTimeout(() => {
   );
 }, 10000);
 
-client
-  .login(cleanToken)
-  .then(() => {
-    clearTimeout(loginTimer);
-    console.log('✅ client.login() Promise が解決しました。');
-  })
-  .catch(err => {
-    clearTimeout(loginTimer);
-    console.error('❌ Discordログイン失敗:', err);
-  });
+import dns from 'node:dns';
+
+// IPv6解決待ちによる接続詰まりを防ぐテスト
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
+const cleanToken = String(TOKEN || '').trim();
+console.log(
+  `🔍 トークン確認: length=${cleanToken.length}, hasWhitespace=${/\s/.test(cleanToken)}, startsWithBot=${cleanToken.startsWith('Bot ')}`
+);
+
+// Discord Gatewayエンドポイントへの疎通テスト
+(async () => {
+  try {
+    console.log('🌐 /api/v10/gateway へ疎通確認中...');
+    const res = await fetch('https://discord.com/api/v10/gateway', {
+      headers: { Authorization: `Bot ${cleanToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    console.log('📡 Gateway API レスポンス:', res.status, data);
+  } catch (err) {
+    console.error('❌ Gateway API 疎通エラー:', err);
+  }
+})();
+
+console.log('🔄 Discordへログインを開始します...');
+
+client.on('debug', msg => {
+  console.log('🪲 [debug]:', msg);
+});
+
+client.once('clientReady', async () => {
+  console.log(`🤖 ログイン完了: ${client.user.tag}`);
+  await registerCommands();
+});
+
+client.on('error', err => {
+  console.error('❌ Discordクライアントエラー:', err);
+});
+
+client.login(cleanToken).catch(err => {
+  console.error('❌ Discordログイン失敗:', err);
+});

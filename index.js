@@ -772,6 +772,48 @@ client.on('error', err => {
   console.error('❌ Discordクライアントエラー:', err);
 });
 
-client.login(TOKEN).catch(err => {
-  console.error('❌ Discordログイン失敗:', err);
+const cleanToken = String(TOKEN || '').trim();
+console.log(
+  `🔍 トークン確認: length=${cleanToken.length}, hasWhitespace=${/\s/.test(cleanToken)}, startsWithBot=${cleanToken.startsWith('Bot ')}`
+);
+console.log('🔄 Discordへログインを開始します...');
+
+client.on('debug', msg => {
+  if (
+    msg.includes('Token') ||
+    msg.includes('Connecting') ||
+    msg.includes('Identifying') ||
+    msg.includes('Ready') ||
+    msg.includes('Heartbeat') ||
+    msg.includes('Error') ||
+    msg.includes('WS')
+  ) {
+    console.log('🪲 [discord.js debug]:', msg);
+  }
 });
+
+client.once('clientReady', async () => {
+  console.log(`🤖 ログイン完了: ${client.user.tag}`);
+  await registerCommands();
+});
+
+client.on('error', err => {
+  console.error('❌ Discordクライアントエラー:', err);
+});
+
+const loginTimer = setTimeout(() => {
+  console.warn(
+    '⚠️ ログイン開始から10秒経過しましたが完了していません（Gateway接続待ち、または環境変数・ネットワーク側のブロックの可能性があります）。'
+  );
+}, 10000);
+
+client
+  .login(cleanToken)
+  .then(() => {
+    clearTimeout(loginTimer);
+    console.log('✅ client.login() Promise が解決しました。');
+  })
+  .catch(err => {
+    clearTimeout(loginTimer);
+    console.error('❌ Discordログイン失敗:', err);
+  });

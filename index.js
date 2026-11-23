@@ -26,7 +26,7 @@ if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
 
-const DEFAULT_LOG_CHANNEL_ID = '1469729912809062491';
+const DEFAULT_LOG_CHANNEL_ID = '1574368805151440956';
 
 const TOKEN = String(process.env.DISCORD_TOKEN || '').trim();
 const CLIENT_ID = String(process.env.CLIENT_ID || '').trim();

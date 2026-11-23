@@ -26,7 +26,8 @@ if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
 
-const DEFAULT_LOG_CHANNEL_ID = '1469729912809062491';
+const DEFAULT_LOG_CHANNEL_ID = '1574368805151440956';
+const DEFAULT_ADMIN_ROLE_IDS = ['1574375289574658088'];
 
 const TOKEN = String(process.env.DISCORD_TOKEN || '').trim();
 const CLIENT_ID = String(process.env.CLIENT_ID || '').trim();
@@ -34,16 +35,18 @@ const GAS_WEB_APP_URL = String(process.env.GAS_WEB_APP_URL || '').trim();
 const LOG_CHANNEL_ID = String(process.env.LOG_CHANNEL_ID || DEFAULT_LOG_CHANNEL_ID).trim();
 const PORT = Number(process.env.PORT || 10000);
 
-// 管理者コマンドを許可するロールID（カンマ区切りで複数指定可能）
-// 例: ADMIN_ROLE_IDS=123456789012345678,987654321098765432
-const ADMIN_ROLE_IDS = String(process.env.ADMIN_ROLE_IDS || '')
+const envAdminRoleIds = String(process.env.ADMIN_ROLE_IDS || '')
   .split(',')
   .map((id) => id.trim())
   .filter(Boolean);
 
-// ロール制限をかける管理者コマンド一覧
+const ADMIN_ROLE_IDS = envAdminRoleIds.length > 0 ? envAdminRoleIds : DEFAULT_ADMIN_ROLE_IDS;
+
+// 全スラッシュコマンドを管理者ロール限定対象にする
 const ADMIN_ONLY_COMMANDS = new Set([
   'panel',
+  'status',
+  'logs',
   'manual-add',
   'edit-log',
   'delete-log',
@@ -77,22 +80,20 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-// 指定された管理者ロールを持っているか判定（ADMIN_ROLE_IDS 未設定時は管理者権限のみ許可）
 function hasAdminRole(interaction) {
-  if (ADMIN_ROLE_IDS.length === 0) {
-    return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator));
-  }
+  if (!interaction.guild) return false;
 
   const memberRoles = interaction.member?.roles;
-  if (!memberRoles) return false;
+  if (memberRoles) {
+    if (typeof memberRoles.cache?.has === 'function') {
+      return ADMIN_ROLE_IDS.some((roleId) => memberRoles.cache.has(roleId));
+    }
+    if (Array.isArray(memberRoles)) {
+      return ADMIN_ROLE_IDS.some((roleId) => memberRoles.includes(roleId));
+    }
+  }
 
-  if (typeof memberRoles.cache?.has === 'function') {
-    return ADMIN_ROLE_IDS.some((roleId) => memberRoles.cache.has(roleId));
-  }
-  if (Array.isArray(memberRoles)) {
-    return ADMIN_ROLE_IDS.some((roleId) => memberRoles.includes(roleId));
-  }
-  return false;
+  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator));
 }
 
 const commands = [
@@ -103,11 +104,13 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('status')
-    .setDescription('現在の勤務状況を確認します'),
+    .setDescription('現在の勤務状況を確認します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   new SlashCommandBuilder()
     .setName('logs')
     .setDescription('直近の勤怠履歴を確認します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((opt) =>
       opt.setName('target').setDescription('対象ユーザー（省略時は全体）').setRequired(false)
     )
@@ -333,10 +336,9 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     if (interaction.isChatInputCommand()) {
-      // 管理者限定コマンドのロールチェック
       if (ADMIN_ONLY_COMMANDS.has(interaction.commandName) && !hasAdminRole(interaction)) {
         await interaction.reply({
-          content: 'この管理者コマンドを実行する権限がありません。',
+          content: 'このコマンドを実行する権限がありません。',
           flags: MessageFlags.Ephemeral,
         });
         return;

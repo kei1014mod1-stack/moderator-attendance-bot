@@ -26,7 +26,7 @@ if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
 
-const DEFAULT_LOG_CHANNEL_ID = '1574368805151440956';
+const DEFAULT_LOG_CHANNEL_ID = '1469729912809062491';
 
 const TOKEN = String(process.env.DISCORD_TOKEN || '').trim();
 const CLIENT_ID = String(process.env.CLIENT_ID || '').trim();
@@ -35,7 +35,7 @@ const LOG_CHANNEL_ID = String(process.env.LOG_CHANNEL_ID || DEFAULT_LOG_CHANNEL_
 const PORT = Number(process.env.PORT || 10000);
 
 // 管理者コマンドを許可するロールID（カンマ区切りで複数指定可能）
-// 例: ADMIN_ROLE_IDS=1563444247863230485
+// 例: ADMIN_ROLE_IDS=123456789012345678,987654321098765432
 const ADMIN_ROLE_IDS = String(process.env.ADMIN_ROLE_IDS || '')
   .split(',')
   .map((id) => id.trim())
@@ -47,7 +47,6 @@ const ADMIN_ONLY_COMMANDS = new Set([
   'manual-add',
   'edit-log',
   'delete-log',
-  'logs',
   'settings',
 ]);
 

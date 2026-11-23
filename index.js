@@ -34,6 +34,23 @@ const GAS_WEB_APP_URL = String(process.env.GAS_WEB_APP_URL || '').trim();
 const LOG_CHANNEL_ID = String(process.env.LOG_CHANNEL_ID || DEFAULT_LOG_CHANNEL_ID).trim();
 const PORT = Number(process.env.PORT || 10000);
 
+// 管理者コマンドを許可するロールID（カンマ区切りで複数指定可能）
+// 例: ADMIN_ROLE_IDS=1563444247863230485
+const ADMIN_ROLE_IDS = String(process.env.ADMIN_ROLE_IDS || '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
+
+// ロール制限をかける管理者コマンド一覧
+const ADMIN_ONLY_COMMANDS = new Set([
+  'panel',
+  'manual-add',
+  'edit-log',
+  'delete-log',
+  'logs',
+  'settings',
+]);
+
 const COLORS = {
   neutral: 0x1e293b,
   active: 0x0f766e,
@@ -60,6 +77,24 @@ healthServer.listen(PORT, '0.0.0.0', () => {
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
+
+// 指定された管理者ロールを持っているか判定（ADMIN_ROLE_IDS 未設定時は管理者権限のみ許可）
+function hasAdminRole(interaction) {
+  if (ADMIN_ROLE_IDS.length === 0) {
+    return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator));
+  }
+
+  const memberRoles = interaction.member?.roles;
+  if (!memberRoles) return false;
+
+  if (typeof memberRoles.cache?.has === 'function') {
+    return ADMIN_ROLE_IDS.some((roleId) => memberRoles.cache.has(roleId));
+  }
+  if (Array.isArray(memberRoles)) {
+    return ADMIN_ROLE_IDS.some((roleId) => memberRoles.includes(roleId));
+  }
+  return false;
+}
 
 const commands = [
   new SlashCommandBuilder()
@@ -299,6 +334,15 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     if (interaction.isChatInputCommand()) {
+      // 管理者限定コマンドのロールチェック
+      if (ADMIN_ONLY_COMMANDS.has(interaction.commandName) && !hasAdminRole(interaction)) {
+        await interaction.reply({
+          content: 'この管理者コマンドを実行する権限がありません。',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       switch (interaction.commandName) {
         case 'panel': {
           const row = new ActionRowBuilder().addComponents(
